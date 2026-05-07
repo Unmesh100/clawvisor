@@ -81,14 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (didInit.current) return
     didInit.current = true
 
-    // Fetch auth mode, features, and refresh token in parallel.
+    // Fetch auth mode and refresh token in parallel. Features are fetched
+    // separately by the user-dependent effect below so we can return a
+    // per-user FeatureSet (e.g. plan-based gating) once the user is known.
     const configPromise = api.config.public()
       .then((cfg) => setAuthMode(cfg.auth_mode))
       .catch((e) => console.warn('useAuth: failed to fetch config', e)) // default stays null → treated like password mode
-
-    const featuresPromise = api.features.get()
-      .then((f) => setFeatures(f))
-      .catch((e) => console.warn('useAuth: failed to fetch features', e)) // default stays null
 
     const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY)
     const authPromise = storedRefresh
@@ -108,8 +106,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           })
       : Promise.resolve()
 
-    Promise.all([configPromise, featuresPromise, authPromise]).finally(() => setIsLoading(false))
+    Promise.all([configPromise, authPromise]).finally(() => setIsLoading(false))
   }, [])
+
+  // Fetch features on mount and whenever the authenticated user changes, so
+  // the server can return per-user feature gates (e.g. plan-based gating).
+  // The cancel flag drops stale responses if `user` changes again before the
+  // in-flight request resolves — without it a slow anonymous request could
+  // clobber a fast per-user response on login.
+  useEffect(() => {
+    let cancelled = false
+    api.features.get()
+      .then((f) => { if (!cancelled) setFeatures(f) })
+      .catch((e) => console.warn('useAuth: failed to fetch features', e))
+    return () => { cancelled = true }
+  }, [user])
 
   // Register a refresh callback so the API client can silently handle 401s on
   // data endpoints (expired access token) without logging the user out.
