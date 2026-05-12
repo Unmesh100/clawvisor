@@ -277,21 +277,34 @@ The user has explicitly opted this task into lenient verification. Apply these a
 func buildVerificationUserMessage(req VerifyRequest) string {
 	params, _ := json.MarshalIndent(req.Params, "", "  ")
 
+	stripTags := func(s string) string {
+		for _, tag := range []string{
+			"<reason>", "</reason>",
+			"<system>", "</system>",
+			"<assistant>", "</assistant>",
+			"<user>", "</user>",
+			"<prompt>", "</prompt>",
+		} {
+			s = strings.ReplaceAll(s, tag, "")
+		}
+		return s
+	}
+
 	var expectedUseLine string
-	if req.ExpectedUse != "" {
-		expectedUseLine = fmt.Sprintf("Action expected use (declared by agent at task creation): %s", req.ExpectedUse)
+	if eu := stripTags(req.ExpectedUse); eu != "" {
+		expectedUseLine = fmt.Sprintf("Action expected use (declared by agent at task creation): %s", eu)
 	} else {
 		expectedUseLine = "Action expected use: not specified (check params against the agent's reason below)"
 	}
 
 	var expansionLine string
-	if req.ExpansionRationale != "" {
-		expansionLine = fmt.Sprintf("\nApproved scope expansion rationale: %s", req.ExpansionRationale)
+	if er := stripTags(req.ExpansionRationale); er != "" {
+		expansionLine = fmt.Sprintf("\nApproved scope expansion rationale: %s", er)
 	}
 
 	var hintsLine string
-	if req.ServiceHints != "" {
-		hintsLine = fmt.Sprintf("\nService-specific verification guidance: %s", req.ServiceHints)
+	if sh := stripTags(req.ServiceHints); sh != "" {
+		hintsLine = fmt.Sprintf("\nService-specific verification guidance: %s", sh)
 	}
 
 	var chainContextLine string
@@ -307,15 +320,12 @@ func buildVerificationUserMessage(req VerifyRequest) string {
 		}
 	}
 
-	// Sanitize the agent's reason to prevent tag injection that could
-	// break out of the <reason> wrapper and confuse the verifier.
 	reason := req.Reason
 	const maxReasonLen = 2048
 	if len(reason) > maxReasonLen {
 		reason = reason[:maxReasonLen]
 	}
-	sanitizedReason := strings.ReplaceAll(reason, "</reason>", "")
-	sanitizedReason = strings.ReplaceAll(sanitizedReason, "<reason>", "")
+	sanitizedReason := stripTags(reason)
 
 	return fmt.Sprintf(`Current date: %s
 Task purpose: %s
